@@ -9,3 +9,6 @@ node_modules/
 # Logs and exported images
 npm-debug.log*
 *.tar
+
+# Lab 4: database dumps never go into Git
+backup/
