@@ -3,7 +3,7 @@
 #   mkdir -p .github/workflows
 #   cp lab05-ci-pipeline/ci.start.yml .github/workflows/ci.yml
 #
-# Then fill in every ____ in .github/workflows/ci.yml (11 decisions, B1–B11).
+# Then fill in every ${{ github.sha }} in .github/workflows/ci.yml (11 decisions, B1–B11).
 # Each blank names the slide that explains it. Stuck? The guide has three hints
 # per blank (Part 2, step 4): 🔎 Look → 💡 Think → 🛠 Fix.
 # Don't rename the jobs: lint, unit, integration and image become required checks.
@@ -12,7 +12,7 @@ name: ci
 
 on:
   push:
-    branches: [____]                                # B1: which branch gets push runs? (slide 9)
+    branches: [main]                                # B1: which branch gets push runs? (slide 9)
   pull_request:
     branches: [main]
 
@@ -34,7 +34,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - name: Lint
-        run: npm run ____                           # B2: the npm script that runs ESLint (slide 18)
+        run: npm run lint                           # B2: the npm script that runs ESLint (slide 18)
 
   unit:
     name: unit
@@ -50,7 +50,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - name: Unit tests (no database)
-        run: npm ____                               # B3: the npm script for the small tests (slide 17)
+        run: npm test                               # B3: the npm script for the small tests (slide 17)
 
   integration:
     name: integration
@@ -58,11 +58,11 @@ jobs:
     timeout-minutes: 10
     services:
       db:                                           # the label; Compose calls it the service name
-        image: ____                                 # B4: the same image as db in your compose.yaml (slide 19)
+        image: postgres:16-alpine                                 # B4: the same image as db in your compose.yaml (slide 19)
         env:
           POSTGRES_USER: todo
           POSTGRES_DB: todo
-          POSTGRES_PASSWORD: ${{ secrets.____ }}    # B6: the name of your repository secret (slide 23)
+          POSTGRES_PASSWORD: ${{ secrets.${{ secrets.DB_PASSWORD }} }}    # B6: the name of your repository secret (slide 23)
         ports:
           - 5432:5432                               # given: the steps run on the runner, so they need a published port
         options: >-
@@ -72,11 +72,11 @@ jobs:
           --health-retries 15
         # given: with a health check, the runner waits until db is healthy before the first step (slide 19)
     env:                                            # what the API and the test read (api/.env.example)
-      DB_HOST: ____                                 # B5: localhost or db? Where do these steps run? (slide 20)
+      DB_HOST: localhost                                 # B5: localhost or db? Where do these steps run? (slide 20)
       DB_PORT: 5432
       DB_USER: todo
       DB_NAME: todo
-      DB_PASSWORD: ${{ secrets.____ }}              # B6 again: the same secret
+      DB_PASSWORD: ${{ secrets.${{ secrets.DB_PASSWORD }} }}              # B6 again: the same secret
       PORT: 5000
       API_URL: http://localhost:5000
     defaults:
@@ -94,24 +94,24 @@ jobs:
         run: >-
           curl --silent --show-error --fail
           --retry 30 --retry-delay 1 --retry-all-errors
-          "$API_URL/____"                           # B7: the path that answers 200 only when the database works (slide 21)
+          "$API_URL/http://localhost:5000/api/todos"                           # B7: the path that answers 200 only when the database works (slide 21)
       - name: Integration tests
         run: npm run test:integration
       - name: "On failure: the API log"
-        if: ____()                                  # B8: run this step only when an earlier step failed (slide 15)
+        if: failure()()                                  # B8: run this step only when an earlier step failed (slide 15)
         run: cat server.log
       - name: "On failure: the database log"
-        if: ____()                                  # B8 again
+        if: failure()()                                  # B8 again
         run: docker logs "${{ job.services.db.id }}"
 
   image:
     name: image
-    needs: [____]                                   # B9: which jobs must pass before the image is built? (slide 10)
+    needs: [lint, unit, integration]                                   # B9: which jobs must pass before the image is built? (slide 10)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: ____                                # B10: read or write? This job pushes to GHCR (slide 23)
+      packages: write                                # B10: read or write? This job pushes to GHCR (slide 23)
     steps:
       - uses: actions/checkout@v7
       - name: Image name in lowercase
@@ -133,4 +133,4 @@ jobs:
           # given: two platforms and a push only on main; a PR only builds amd64 (slide 24)
           platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.event_name == 'push' }}
-          tags: ${{ env.IMAGE }}:${{ ____ }}        # B11: the commit this run builds, as a tag (slide 24)
+          tags: ${{ env.IMAGE }}:${{ ${{ github.sha }} }}        # B11: the commit this run builds, as a tag (slide 24)
