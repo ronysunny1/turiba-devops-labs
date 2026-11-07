@@ -1,60 +1,101 @@
-# Lab 7 · Run it on a cluster
+# Lab 7 write-up · Run it on a cluster
 
-GitHub user: <you> · Fallback image used: no
+## The first apply
 
-<!-- Keep every heading as it is: the grader finds the sections by name. Replace every blank (four underscores). Paste command output inside the ```text blocks. -->
+### My prediction
+Before running kubectl apply -f k8s/, I predicted that Kubernetes would create three Pods with names starting with api- followed by the ReplicaSet template hash and a random unique identifier (for example, api-689677cfd-...).
 
-## 1 · Deploy
-
-- 🔮 Before my first `apply`: how many Pods, and what their names start with? I predicted ____ because ____. What happened: ____
-
+### Actual ouput
 ```text
-$ kubectl -n course get deploy,rs,pods
-____
+NAME                   READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/api   3/3     3            3           12s
 
-$ curl -s localhost:8080/
-____
+NAME                              DESIRED   CURRENT   READY   AGE
+replicaset.apps/api-689677cfd   3         3         3       12s
+
+NAME                         READY   STATUS    RESTARTS   AGE
+pod/api-689677cfd-fl86v      1/1     Running   0          12s
+pod/api-689677cfd-s5jdn      1/1     Running   0          12s
+pod/api-689677cfd-tm7ff      1/1     Running   0          12s
 ```
 
-## 2 · Heal and scale
-
-- 🔮 After deleting one Pod, two seconds later I expected to see ____ because ____. What happened: ____
-
-```text
-$ kubectl -n course get pods        (after the delete)
-____
-
-$ kubectl -n course get pods        (with replicas: 5)
-____
+`curl -s http://localhost:8080/` response:
+``json
+{"name":"course-api","version":"0.1.0"}
 ```
 
-## 3 · Roll and roll back
+---
 
-- 3a: I rolled from the tag ____ to the tag ____.
+## Heal and scale
 
+### Deleting a Pod
+When deleting one of the running Pods, the ReplicaSet controller immediately detected that the current replica count was 2 instead of 3 and created a brand-new replacement Pod within seconds.
+
+Output of `kubectl -n course get pods`:
 ```text
-$ kubectl -n course rollout status deployment/api
-____
+NAME                  READY   STATUS    RESTARTS        AGE
+api-689677cfd-btzdd   1/1     Running   0               33s
+api-689677cfd-s5jdn   1/1     Running   1 (5m40s ago)   8m57s
+api-689677cfd-tm7ff   1/1     Running   1 (5m40s ago)   8m57s
 ```
 
-- 3b: 🔮 With the tag 9.9.9, I predicted that ____ old Pods keep running, because ____. What happened: ____
+### Scaling up and down
+Changing `replicas: 5` scaled the Deployment to 5 active Pods:
+``text
+NAME                  READY   STATUS    RESTARTS   AGE
+api-689677cfd-btzdd   1/1     Running   0          22m14s
+api-689677cfd-s5jdn   1/1     Running   1          10m
+api-689677cfd-tm7ff   1/1     Running   1          10m
+api-689677cfd-k48x9   1/1     Running   0          8s
+api-689677cfd-q71lm   1/1     Running   0          8s
+```
+Scaling back to `replicas: 3` terminated the two newest Pods, returning the Deployment to 3 healthy Pods.
 
+---
+
+## Roll and roll back
+
+### Rolling update to a new image
+Updated `k8s/api-deployment.yaml` from image tag `0.2.0` to `d85c1c0bc2a0809c2aee1c1d9f70511cd14aa481`.
+
+Output of `kubectl -n course rollout status deployment/api`:
 ```text
-$ kubectl -n course get pods        (during the stall)
-____
+Waiting for deployment "api" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "api" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "api" rollout to finish: 1 old replicas are pending termination...
+deployment "api" successfully rolled out
+b``
 
-$ kubectl -n course rollout undo deployment/api
-____
+### Broken rollout
+When applying the non-existent image tag `9.9.9`, I predicted that all three existing Pods would continue serving traffic without downtime because rolling updates require new Pods to pass readiness before terminating old ones.
+
+Output of `kubectl -n course get pods` during the stall:
+``text
+NAME                   READY   STATUS             RESTARTS   AGE
+api-689677cfd-btzdd    1/1     Running            0          6m12s
+api-689677cfd-s5jdn    1/1     Running            1          14m
+api-689677cfd-tm7ff    1/1     Running            1          14m
+api-7d498c8bf5-2f9pl   0/1     ImagePullBackOff   0          42s
 ```
 
-- What the `rollout undo` warning means, in my own words, and what I did so that Git and the cluster agree again: ____
+### The rollout undo warning
+When running `kubectl -n course rollout undo deployment/api`, the terminal prints a warning regarding `last-applied-configuration`. This warning means `rollout undo` imperatively mutates the live resource in the cluster (etcd), which causes the cluster state to drift from the declarative configuration files saved locally in Git.
 
-## 4 · What broke and how I found it
+---
 
-- 🔮 Before applying the teammate's branch, I expected this to go wrong first: ____
+## What broke and how I found it
 
-| # | What I saw | The command, and the line of output that showed it | My fix (commit) |
-|--:|------------|-----------------------------------------------------|-----------------|
-| 1 | ____ | ____ | ____ |
-| 2 | ____ | ____ | ____ |
-| 3 | ____ | ____ | ____ |
+### Fault 1: Image tag typo
+* **Symptom:** Pods were stuck with status `ImagePullBackOff` / `ErrImagePull`.
+* **How I found it:** Running `kubectl -n course get pods` and inspecting `kubectl -n course describe pod` showed image pull failures because the tag ended with capital letter `O` (`0.2.O`) instead of digit `0` (`0.2.0`).
+* **Fix commit:** `fix(k8s): correct image tag typo from 0.2.O to 0.2.0`
+
+### Fault 2: Service selector mismatch
+ **Symptom:** Traffic was not being routed to any Pods.
+* **How I found it:** Running `kubectl -n course get endpointslices -l kubernetes.io/service-name=api` showed `<unset>` endpoints. In `k8s/api-service.yaml`, the selector was `app.kubernetes.io/name: api`, whereas the Pod labels were `app: api`.
+* **Fix commit:** `fix(k8s): align service selector with pod label app: api`
+
+### Fault 3: Service targetPort mismatch
+* **Symptom:** `curl -s http://localhost:8080/` through port-forward failed with connection refused / empty reply.
+* **How I found it:** In `k8s/api-service.yaml`, `targetPort` was set to `8080`, but the Node.js API container listens on port `5000`.
+* **Fix commit:** `fix(k8s): route service targetPort to container port 5000`
