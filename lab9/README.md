@@ -79,3 +79,12 @@ H[™™\İÜ™Y[È\X™\XØ\ÈÈKÌH[›š[™Ø‚‹H<'å+ˆ™Y›Ü™H[H[š[œİ
 B–×B˜‚ˆÈÈÈ0­ÈÚ]œ›ÚÙH[™İÈH›İ[™]‚‹H<'å+ˆ™Y›Ü™H\Ü˜Y[™ÈÚ]HX[[X]IÜÈœ˜[˜ÚH^XİY\ÈÈÛÈÜ›Û™Èš\œİˆH^XİY[H\Ü˜YXÈ˜Z[ÛˆHÛÛ™›XİÚ]H™]ÛHYY[\]\ËÛ˜[Y\ÜXÙKX[[™\Ûİ\˜ÙH™XØ]\ÙH˜[Y\ÜXÙKØÛİ\œÙX[™XYH^\İY[ˆHÛ\İ\ˆÚ]İ][HİÛ™\œÚ\Y]Y]K‚‚ˆÈÚ]HØ]ÈHÛÛ[X[™[™H[™HÙˆİ]]]ÚİÙY]^Hš^
 ÛÛ[Z]
 HŸKNŸKKKKKKKKKKK_KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK_KKKKKKKKKKKKKKKK_ŸH[\]Hš[Ú[\ˆ\œ›Üˆ™XØ]\ÙH\KY\Ş[Y[X[[™Y™\™[˜Ù
+## 3 Â· What broke and how I found it
+
+- ğŸ”® Before upgrading with the teammate's branch, I expected this to go wrong first: I expected `helm upgrade` to fail on a conflict with the newly added `templates/namespace.yaml` resource because `namespace/course` already existed in the cluster without Helm ownership metadata.
+
+| # | What I saw | The command, and the line of output that showed it | My fix (commit) |
+|--:|------------|-----------------------------------------------------|-----------------|
+| 1 | Template nil pointer error because `api-deployment.yaml` referenced `.Values.api.images.repository` instead of `.Values.api.image.repository` | `helm upgrade course-app charts/course-app -n course` -> `executing "course-app/templates/api-deployment.yaml" at <.Values.api.images.repository>: nil pointer evaluating interface {}.repository` | Restored `.Values.api.image.repository` in `charts/course-app/templates/api-deployment.yaml` (`6785ee7`) |
+| 2 | Chart included `templates/namespace.yaml`, which conflicts with the pre-existing cluster namespace and violates chart scoping | `git show c009feb` -> `+++ b/charts/course-app/templates/namespace.yaml` (`kind: Namespace`) | Removed `charts/course-app/templates/namespace.yaml` from the chart (`8cefaae`) |
+| 3 | `values.yaml` renamed `replicas: 3` to `replicaCount: 3`, causing the API deployment to drop from 3 replicas to 1 | `kubectl -n course get deployment api` -> `api   1/1     1            1` | Renamed `replicaCount: 3` back to `replicas: 3` in `charts/course-app/values.yaml` (`82c85eb`) |
