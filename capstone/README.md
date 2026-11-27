@@ -100,7 +100,6 @@ None claimed.
 
 ## Known issues
 
-- Add `observability/dashboard.png` to `observability/` so the screenshot link in `capstone/README.md` resolves.
 
 ---
 
